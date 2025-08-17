@@ -184,7 +184,7 @@ subagents = [fundamental_analyst, technical_analyst, risk_analyst]
 
 
 # Main research instructions
-research_instructions = """You are an elite stock research analyst with access to multiple specialized tools and sub-agents. 
+DEFAULT_RESEARCH_INSTRUCTIONS = """You are an elite stock research analyst with access to multiple specialized tools and sub-agents. 
 
 Your research process should be systematic and comprehensive:
 
@@ -213,19 +213,21 @@ tools = [
 ]
 
 # Create the DeepAgent
-stock_research_agent = create_deep_agent(
-    tools=tools,
-    instructions=research_instructions,
-    subagents=subagents,
-    model=openai_model
-)
 
 
 
 
 
-def run_stock_research(query: str, progress_area):
+
+def run_stock_research(query: str, progress_area, instructions: str):
     """Run the agent while streaming intermediate results to the UI."""
+
+    stock_research_agent = create_deep_agent(
+        tools=tools,
+        instructions=instructions,
+        subagents=subagents,
+        model=openai_model
+    )
 
     async def _run():
         final_output = ""
@@ -271,10 +273,10 @@ def run_stock_research(query: str, progress_area):
 
 st.set_page_config(page_title="Stock Research Agent", page_icon="📊", layout="centered")
 st.title("Stock Research Agent")
-st.caption("Enter a research request. Example: Comprehensive analysis on Apple Inc. (AAPL)")
+research_instructions = st.text_area("Research Instructions", height=160, value=DEFAULT_RESEARCH_INSTRUCTIONS)    
 
-query = st.text_area("Research Query", height=160, placeholder="Type your research query here...")
+query = st.text_area("Research Query", height=160, placeholder="Example: Comprehensive analysis on Apple Inc. (AAPL)")
 if st.button("Run Analysis"):
     progress_area = st.container()
-    output = run_stock_research(query, progress_area)
+    output = run_stock_research(query, progress_area, research_instructions)
     st.text_area("Research Report", value=output, height=400)
