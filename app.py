@@ -262,7 +262,7 @@ def run_stock_research(query: str, progress_area, instructions: str):
                     else:
                         summary = await summarize_text(output)
                         role = "Tool" if event_type == "on_tool_end" else "Agent"
-                        progress_area.write(f"{role}: {name}: {summary}")
+                        progress_area.write(f"{role}: {name}: {summary.replace('$', '\\$')}")
         except Exception:
             logging.exception("[run_stock_research] Exception during streaming:")
             return "Error: Streaming failed"
@@ -279,4 +279,4 @@ query = st.text_area("Research Query", height=160, placeholder="Example: Compreh
 if st.button("Run Analysis"):
     progress_area = st.container()
     output = run_stock_research(query, progress_area, research_instructions)
-    st.text_area("Research Report", value=output, height=400)
+    st.text_area("# Research Report", value=output, height=600)
