@@ -277,6 +277,7 @@ research_instructions = st.text_area("Research Instructions", height=160, value=
 
 query = st.text_area("Research Query", height=160, placeholder="Example: Comprehensive analysis on Apple Inc. (AAPL)")
 if st.button("Run Analysis"):
-    progress_area = st.container()
-    output = run_stock_research(query, progress_area, research_instructions)
-    st.text_area("# Research Report", value=output, height=600)
+    with st.spinner("Running analysis...", show_time=True):
+        progress_area = st.container()
+        output = run_stock_research(query, progress_area, research_instructions)
+        st.text_area("# Research Report", value=output, height=600)
