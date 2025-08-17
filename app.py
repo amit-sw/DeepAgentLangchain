@@ -11,6 +11,7 @@ import logging
 from langchain_core.tools import tool
 from typing import Dict
 import json
+import asyncio
 
 def load_secrets():
     """Load secrets from .streamlit/secrets.toml and set as environment variables."""
@@ -223,46 +224,38 @@ stock_research_agent = create_deep_agent(
 
 
 
-def run_stock_research(query: str):
-    """Run the stock research agent and return the final message content with debug logging."""
-    try:
-        logging.info(f"[run_stock_research] Query received: {query}")
-        
-        result = stock_research_agent.invoke({
-            "messages": [{"role": "user", "content": query}]
-        })
+def run_stock_research(query: str, progress_area):
+    """Run the agent while streaming intermediate results to the UI."""
 
-        logging.debug(f"[run_stock_research] Full result: {result}")
-        
-        messages = result.get("messages", [])
-        output_text = ""
-        
-        if not messages:
-            logging.warning("[run_stock_research] No messages returned in result.")
-            output_text = "Error: No response messages received."
-        elif isinstance(messages[-1], dict):
-            output_text = messages[-1].get("content", "")
-            logging.debug(f"[run_stock_research] Output content from dict: {output_text}")
-        elif hasattr(messages[-1], "content"):
-            output_text = messages[-1].content
-            logging.debug(f"[run_stock_research] Output content from object: {output_text}")
-        else:
-            logging.error("[run_stock_research] Unrecognized message format.")
-            output_text = "Error: Invalid response message format."
+    async def _run():
+        final_output = ""
+        try:
+            async for event in stock_research_agent.astream_events(
+                {"messages": [{"role": "user", "content": query}]},
+                version="v1",
+            ):
+                event_type = event.get("event", "")
+                name = event.get("name", "")
+                data = event.get("data", {})
 
-        file_output = ""
-        if "files" in result:
-            file_output += "\n\n=== Generated Research Files ===\n"
-            for filename, content in result["files"].items():
-                preview = content[:500] + "..." if len(content) > 500 else content
-                file_output += f"\n**{filename}**\n{preview}\n"
-                logging.debug(f"[run_stock_research] File: {filename}, Preview: {preview[:100]}")
+                if event_type == "on_tool_end":
+                    output = data.get("output", "")
+                    with progress_area.expander(f"Tool: {name}"):
+                        st.write(output)
+                elif event_type == "on_chain_end":
+                    output = data.get("output", "")
+                    if name and name != stock_research_agent.get_name():
+                        with progress_area.expander(f"Agent: {name}"):
+                            st.write(output)
+                    else:
+                        final_output = output
+        except Exception:
+            logging.exception("[run_stock_research] Exception during streaming:")
+            return "Error: Streaming failed"
 
-        return output_text + file_output
+        return final_output
 
-    except Exception as e:
-        logging.exception("[run_stock_research] Exception during invocation:")
-        return f"Error: {str(e)}"
+    return asyncio.run(_run())
 
 st.set_page_config(page_title="Stock Research Agent", page_icon="📊", layout="centered")
 st.title("Stock Research Agent")
@@ -270,5 +263,6 @@ st.caption("Enter a research request. Example: Comprehensive analysis on Apple I
 
 query = st.text_area("Research Query", height=160, placeholder="Type your research query here...")
 if st.button("Run Analysis"):
-    output = run_stock_research(query)
+    progress_area = st.container()
+    output = run_stock_research(query, progress_area)
     st.text_area("Research Report", value=output, height=400)
