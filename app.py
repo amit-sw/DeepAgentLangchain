@@ -229,6 +229,18 @@ def run_stock_research(query: str, progress_area):
 
     async def _run():
         final_output = ""
+        async def summarize_text(text: str) -> str:
+            """Use the LLM to summarize long text into a brief string."""
+            if not text:
+                return ""
+            try:
+                response = await openai_model.ainvoke(
+                    f"Summarize the following text in 1-2 sentences:\n\n{text}"
+                )
+                return getattr(response, "content", str(response)).strip()
+            except Exception:
+                logging.exception("[run_stock_research] Summarization failed")
+                return text
         try:
             async for event in stock_research_agent.astream_events(
                 {"messages": [{"role": "user", "content": query}]},
@@ -238,17 +250,17 @@ def run_stock_research(query: str, progress_area):
                 name = event.get("name", "")
                 data = event.get("data", {})
 
-                if event_type == "on_tool_end":
+                if event_type.endswith("_end"):
                     output = data.get("output", "")
-                    with progress_area.expander(f"Tool: {name}"):
-                        st.write(output)
-                elif event_type == "on_chain_end":
-                    output = data.get("output", "")
-                    if name and name != stock_research_agent.get_name():
-                        with progress_area.expander(f"Agent: {name}"):
-                            st.write(output)
-                    else:
+
+                    if event_type == "on_chain_end" and (
+                        not name or name == stock_research_agent.get_name()
+                    ):
                         final_output = output
+                    else:
+                        summary = await summarize_text(output)
+                        role = "Tool" if event_type == "on_tool_end" else "Agent"
+                        progress_area.write(f"{role}: {name}: {summary}")
         except Exception:
             logging.exception("[run_stock_research] Exception during streaming:")
             return "Error: Streaming failed"
