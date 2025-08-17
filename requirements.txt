@@ -3,3 +3,7 @@ yfinance
 deepagents
 langchain-core
 langchain-openai
+pyautogen
+openai
+autogen-agentchat
+autogen-ext[openai]

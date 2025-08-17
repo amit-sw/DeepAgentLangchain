@@ -1,0 +1,24 @@
+# Requirements: Migrate `app_autogen.py` to Microsoft AutoGen
+
+- Goal: Replace LangChain agent usage in `app_autogen.py` with Microsoft AutoGen agents while preserving current Streamlit UX and behavior.
+- In scope:
+  - Implement AutoGen agents (assistant/tool-executor) to perform current research flows.
+  - Maintain environment/secret loading from `.streamlit/secrets.toml` and env vars.
+  - Keep logging behavior with configurable levels and destinations.
+  - Preserve UI contract with Streamlit (inputs, progress streaming, final output string).
+  - Use OpenAI-compatible models already configured in the project.
+- Out of scope (for this change):
+  - Refactors to `app.py` (LangChain-based), unless required for shared utilities.
+  - Non-agent UI redesign.
+- Functional requirements:
+  - Users can run the same research query and receive a final report.
+  - Intermediate updates are streamed to the UI (tool/agent steps).
+  - Errors are handled and surfaced clearly in the UI and logs.
+- Non-functional requirements:
+  - Clear, structured logs with levels (debug/info/warn/error) that can be switched.
+  - Minimal new dependencies; pin versions in `requirements.txt`.
+  - Easy local run via `streamlit run app_autogen.py`.
+- Success criteria:
+  - Feature parity with current behavior.
+  - No breaking changes to existing secrets/config.
+  - Documentation updated (PRD, EDD, Deployment, User Guide).
