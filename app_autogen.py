@@ -55,7 +55,7 @@ logging.basicConfig(
 )
 # 1. Create an OpenAI model
 openai_model = ChatOpenAI(
-    model="gpt-5-mini", 
+    model="gpt-4",
     temperature=0,
 )
 
@@ -177,15 +177,81 @@ def technical_indicators(symbol: str, period: str = "3mo") -> str:
 
 
 
-def run_stock_research_autogen(query: str, progress_area, instructions: str):
+# Sub-agent configurations
+fundamental_analyst = {
+    "name": "fundamental_analyst",
+    "description": "Performs deep fundamental analysis of companies including financial ratios, growth metrics, and valuation",
+    "prompt": """You are an expert fundamental analyst with 15+ years of experience.
+    Focus on:
+    - Financial statement analysis
+    - Ratio analysis (P/E, P/B, ROE, ROA, Debt-to-Equity)
+    - Growth metrics and trends
+    - Industry comparisons
+    - Intrinsic value calculations
+    Always provide specific numbers and cite your sources."""
+}
+
+technical_analyst = {
+    "name": "technical_analyst",
+    "description": "Analyzes price patterns, technical indicators, and trading signals",
+    "prompt": """You are a professional technical analyst specializing in chart analysis and trading signals.
+    Focus on:
+    - Price action and trend analysis
+    - Technical indicators (RSI, MACD, Moving Averages)
+    - Support and resistance levels
+    - Volume analysis
+    - Entry/exit recommendations
+    Provide specific price levels and timeframes for your recommendations."""
+}
+
+risk_analyst = {
+    "name": "risk_analyst",
+    "description": "Evaluates investment risks and provides risk assessment",
+    "prompt": """You are a risk management specialist focused on identifying and quantifying investment risks.
+    Focus on:
+    - Market risk analysis
+    - Company-specific risks
+    - Sector and industry risks
+    - Liquidity and credit risks
+    - Regulatory and compliance risks
+    Always quantify risks where possible and suggest mitigation strategies."""
+}
+
+subagents = [fundamental_analyst, technical_analyst, risk_analyst]
+
+
+# Main research instructions
+DEFAULT_RESEARCH_INSTRUCTIONS = """You are an elite stock research analyst with access to multiple specialized tools and sub-agents.
+
+Your research process should be systematic and comprehensive:
+
+1. **Initial Data Gathering**: Start by collecting basic stock information, price data, and recent news
+2. **Fundamental Analysis**: Deep dive into financial statements, ratios, and company fundamentals
+3. **Technical Analysis**: Analyze price patterns, trends, and technical indicators
+4. **Risk Assessment**: Identify and evaluate potential risks
+5. **Competitive Analysis**: Compare with industry peers when relevant
+6. **Synthesis**: Combine all findings into a coherent investment thesis
+7. **Recommendation**: Provide clear buy/sell/hold recommendation with price targets
+
+Always:
+- Use specific data and numbers to support your analysis
+- Cite your sources and methodology
+- Consider multiple perspectives and potential scenarios
+- Provide actionable insights and concrete recommendations
+- Structure your final report professionally
+
+When using sub-agents, provide them with specific, focused tasks and incorporate their specialized insights into your overall analysis."""
+
+
+async def run_stock_research_autogen(query: str, progress_area, instructions: str):
     """Run an Assistant that consults three sub-agents, then synthesizes a report."""
 
     system_prompt = instructions.strip()
-    print(f"[run_stock_research_autogen] OPENAI_MODEL: {OPENAI_MODEL}, System prompt: {system_prompt}")
+    print(f"[run_stock_research_autogen] OPENAI_MODEL: {openai_model.model_name}, System prompt: {system_prompt}")
 
     # Build a single model client reused by all agents
     model_client = OpenAIChatCompletionClient(
-        model=OPENAI_MODEL,
+        model=openai_model.model_name,
         api_key=os.getenv("OPENAI_API_KEY", "")
     )
 
@@ -221,7 +287,7 @@ def run_stock_research_autogen(query: str, progress_area, instructions: str):
         task = (
             f"You are the {agent.name}. Work on the following research query: '{query}'.\n"
             f"Deliver a concise section focused on your specialty: {subrole_desc}.\n"
-            f"Return a markdown section with a clear heading '## {agent.name.replace('-', ' ').title()}',\n"
+            f"Return a markdown section with a clear heading '## {agent.name.replace('_', ' ').title()}',\n"
             f"specific numbers, brief rationale, and cite sources inline (e.g., [source]).\n"
         )
         result = await agent.run(task=task)
@@ -234,11 +300,14 @@ def run_stock_research_autogen(query: str, progress_area, instructions: str):
             pass
         return content
 
-    # Execute sub-agents (sequentially to stream progress reliably in Streamlit)
-    import asyncio as _asyncio
-    fundamental_out = _asyncio.run(run_sub(sub_agents[0], fundamental_analyst["description"]))
-    technical_out = _asyncio.run(run_sub(sub_agents[1], technical_analyst["description"]))
-    risk_out = _asyncio.run(run_sub(sub_agents[2], risk_analyst["description"]))
+    # Execute sub-agents concurrently
+    tasks = [
+        run_sub(sub_agents[0], fundamental_analyst["description"]),
+        run_sub(sub_agents[1], technical_analyst["description"]),
+        run_sub(sub_agents[2], risk_analyst["description"]),
+    ]
+    fundamental_out, technical_out, risk_out = await asyncio.gather(*tasks)
+
 
     # Now synthesize a final report using the main assistant
     synthesis_task = (
@@ -252,7 +321,7 @@ def run_stock_research_autogen(query: str, progress_area, instructions: str):
         "End with 'Sources' aggregating citations from all sections."
     )
 
-    synth_result = _asyncio.run(assistant.run(task=synthesis_task))
+    synth_result = await assistant.run(task=synthesis_task)
     final_text = getattr(synth_result, "content", None) or str(synth_result)
 
     return final_text
@@ -264,17 +333,8 @@ try:
     st.set_page_config(page_title="Stock Research Agent (Autogen)", page_icon="📊", layout="centered")
     st.title("Stock Research Agent (Autogen)")
 
-    default_instructions = globals().get(
-        "DEFAULT_RESEARCH_INSTRUCTIONS",
-        (
-            "You are an elite stock research analyst with access to multiple specialized tools and sub-agents.\n\n"
-            "1) Gather data, 2) Fundamentals, 3) Technicals, 4) Risks, 5) Synthesis & Recommendation.\n"
-            "Provide specific numbers, cite sources, and write a concise professional report."
-        ),
-    )
-
     research_instructions = st.text_area(
-        "Research Instructions", height=160, value=default_instructions
+        "Research Instructions", height=160, value=DEFAULT_RESEARCH_INSTRUCTIONS
     )
 
     query = st.text_area(
@@ -286,7 +346,7 @@ try:
         print(f"[run_stock_research] Running analysis. {query=}, {research_instructions=}...")
         with st.spinner("Running analysis..."):
             progress_area = st.container()
-            output = run_stock_research_autogen(query, progress_area, research_instructions)
+            output = asyncio.run(run_stock_research_autogen(query, progress_area, research_instructions))
             st.text_area("# Research Report", value=output, height=600)
 except Exception as _e:
     # If Streamlit isn't the runner, ignore UI setup
