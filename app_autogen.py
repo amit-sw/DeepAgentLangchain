@@ -55,7 +55,7 @@ logging.basicConfig(
 )
 # 1. Create an OpenAI model
 openai_model = ChatOpenAI(
-    model="gpt-4",
+    model="gpt-5-nano",
     temperature=0,
 )
 
