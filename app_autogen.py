@@ -248,6 +248,19 @@ async def run_stock_research_autogen(query: str, progress_area, instructions: st
 
     system_prompt = instructions.strip()
     print(f"[run_stock_research_autogen] OPENAI_MODEL: {openai_model.model_name}, System prompt: {system_prompt}")
+    
+    async def summarize_text(text: str) -> str:
+        """Use the LLM to summarize long text into a brief string."""
+        if not text:
+            return ""
+        try:
+            response = await openai_model.ainvoke(
+                f"Summarize the following text in 1-2 sentences:\n\n{text}"
+            )
+            return getattr(response, "content", str(response)).strip()
+        except Exception:
+            logging.exception("[run_stock_research_autogen] Summarization failed")
+            return text
 
     # Build a single model client reused by all agents
     model_client = OpenAIChatCompletionClient(
@@ -281,25 +294,35 @@ async def run_stock_research_autogen(query: str, progress_area, instructions: st
 
     # Instantiate sub-agents from the provided configs
     sub_agents = [make_subagent(cfg) for cfg in subagents]
-
+    
     # A small wrapper to run a sub-agent with a focused instruction
     async def run_sub(agent: AssistantAgent, subrole_desc: str) -> str:
         task = (
-            f"You are the {agent.name}. Work on the following research query: '{query}'.\n"
-            f"Deliver a concise section focused on your specialty: {subrole_desc}.\n"
-            f"Return a markdown section with a clear heading '## {agent.name.replace('_', ' ').title()}',\n"
-            f"specific numbers, brief rationale, and cite sources inline (e.g., [source]).\n"
+            f"You are the {agent.name}. Work on the following research query: '{query}'.\
+"
+            f"Deliver a concise section focused on your specialty: {subrole_desc}.\
+"
+            f"Return a markdown section with a clear heading '## {agent.name.replace('_', ' ').title()}',\
+"
+            f"specific numbers, brief rationale, and cite sources inline (e.g., [source]).\
+"
         )
         result = await agent.run(task=task)
         content = getattr(result, "content", None)
         if not content:
             content = str(result)
+        
         try:
+            # Get a summary of the agent's output for progress reporting
+            summary = await summarize_text(content)
+            role = "Agent"
+            progress_area.write(f"{role}: {agent.name}: {summary.replace('$', '\\$')}")
             progress_area.write(f"✅ {agent.name} completed.")
         except Exception:
-            pass
+            progress_area.write(f"✅ {agent.name} completed.")
+            
         return content
-
+    
     # Execute sub-agents concurrently
     tasks = [
         run_sub(sub_agents[0], fundamental_analyst["description"]),
@@ -322,8 +345,28 @@ async def run_stock_research_autogen(query: str, progress_area, instructions: st
     )
 
     synth_result = await assistant.run(task=synthesis_task)
-    final_text = getattr(synth_result, "content", None) or str(synth_result)
-
+    raw_final_text = getattr(synth_result, "content", None) or str(synth_result)
+    
+    # Process the final output to make it more concise and structured
+    try:
+        # Extract key sections and format them
+        sections = []
+        
+        # Format the report with better structure
+        formatted_text = await openai_model.ainvoke(
+            f"Format the following stock research report into a concise, professional format with clear sections, "
+            f"bullet points for key insights, and highlighting for important metrics. "
+            f"Keep all factual content but improve readability:\n\n{raw_final_text}"
+        )
+        final_text = getattr(formatted_text, "content", raw_final_text).strip()
+        
+        # Add a header for better presentation
+        final_text = "# Stock Research Report\n\n" + final_text
+        
+    except Exception as e:
+        logging.exception("[run_stock_research_autogen] Final report formatting failed")
+        final_text = raw_final_text
+    
     return final_text
 
 # --- Streamlit UI ---
@@ -343,11 +386,20 @@ try:
     )
 
     if st.button("Run Analysis"):
-        print(f"[run_stock_research] Running analysis. {query=}, {research_instructions=}...")
-        with st.spinner("Running analysis..."):
+        print(f"[run_stock_research_autogen] Running analysis. {query=}, {research_instructions=}...")
+        with st.spinner("Running analysis...", show_time=True):
             progress_area = st.container()
             output = asyncio.run(run_stock_research_autogen(query, progress_area, research_instructions))
-            st.text_area("# Research Report", value=output, height=600)
+            
+            # Display the final report using markdown for better formatting
+            st.markdown("## 📊 Final Research Report")
+            report_container = st.container()
+            with report_container:
+                st.markdown(output)
+                
+            # Also provide the option to view in a text area for copying
+            with st.expander("View as plain text (for copying)"):
+                st.text_area("", value=output, height=400)
 except Exception as _e:
     # If Streamlit isn't the runner, ignore UI setup
     pass
